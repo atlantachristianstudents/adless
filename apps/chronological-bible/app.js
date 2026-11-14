@@ -14,6 +14,17 @@ const SHORT=['Gen.','Exo.','Lev.','Num.','Deut.','Josh.','Judg.','Ruth','1 Sam.'
 const LONG='Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|1 Samuel|2 Samuel|1 Kings|2 Kings|1 Chronicles|2 Chronicles|Ezra|Nehemiah|Esther|Job|Psalm|Proverbs|Ecclesiastes|Song of Solomon|Isaiah|Jeremiah|Lamentations|Ezekiel|Daniel|Hosea|Joel|Amos|Obadiah|Jonah|Micah|Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|Matthew|Mark|Luke|John|Acts|Romans|1 Corinthians|2 Corinthians|Galatians|Ephesians|Philippians|Colossians|1 Thessalonians|2 Thessalonians|1 Timothy|2 Timothy|Titus|Philemon|Hebrews|James|1 Peter|2 Peter|1 John|2 John|3 John|Jude|Revelation'.split('|');
 const names={};SHORT.forEach((s,i)=>{names[s]=LONG[i]});
 
+// Normalize references independently so phrase searches keep their original words.
+function normalizeBook(value){return value.toLowerCase().replace(/[.\s]/g,'')}
+function parseSearchReference(value){
+  const match=value.match(/^((?:[1-3]\s*)?[a-z][a-z. ]*?)(?:\s*(\d+)(?:\s*:\s*(\d+))?)?$/i);
+  if(!match)return null;
+  const name=normalizeBook(match[1]);
+  const book=LONG.find((full,i)=>normalizeBook(full)===name||normalizeBook(SHORT[i])===name||
+    (full==='Psalm'&&name==='psalms')||(full==='Song of Solomon'&&['songofsongs','song'].includes(name)));
+  return book?{book,chapter:match[2]?Number(match[2]):null,verse:match[3]?Number(match[3]):null}:null;
+}
+
 let verses=[],parts=[];
 const esc=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -102,7 +113,7 @@ $('#exportBookmarks').onclick=()=>{const data={format:'acs-chronological-bible-b
 $('#importBookmarks').onclick=()=>$('#bookmarkFile').click();
 $('#bookmarkFile').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());if(data.format!=='acs-chronological-bible-bookmarks'||data.version!==1||!Array.isArray(data.bookmarks))throw new Error('Invalid bookmark file');let added=0,skipped=0;for(const item of data.bookmarks){const ref=typeof item==='string'?item:item?.reference;if(typeof ref!=='string'){skipped++;continue}const i=verses.findIndex(v=>v[0].toLowerCase()===ref.trim().toLowerCase());if(i<0){skipped++;continue}if(!state.saved.includes(i)){state.saved.push(i);added++}}state.saved.sort((a,b)=>a-b);persist();render(false);$('#bookmarkStatus').textContent=`Imported ${added} ${added===1?'bookmark':'bookmarks'}${skipped?`; skipped ${skipped} unrecognized entries`:''}.`}catch{$('#bookmarkStatus').textContent='Could not import bookmarks. Choose a valid Chronological Bible bookmark file.'}finally{e.target.value=''}};
 $('#timelineTab').onclick=()=>{savedView=false;nav()};$('#savedTab').onclick=()=>{savedView=true;nav()};$('#menu').onclick=()=>document.body.classList.add('nav-open');$('#close').onclick=$('#shade').onclick=()=>document.body.classList.remove('nav-open');
-$('#searchOpen').onclick=()=>{$('#searchDialog').showModal();if(matchMedia('(hover: none) and (pointer: coarse)').matches)passageTable.querySelector('button[tabindex="0"]')?.focus({preventScroll:true});else $('#query').focus()};$('#settingsOpen').onclick=()=>$('#settings').showModal();$('#about').onclick=()=>$('#info').showModal();document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('#smaller').onclick=()=>{fontBeforeMax=null;state.size=Math.max(16,state.size-1);appearance()};$('#larger').onclick=()=>{fontBeforeMax=null;state.size=Math.min(28,state.size+1);appearance()};document.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>{state.theme=b.dataset.theme;appearance()});
+$('#searchOpen').onclick=()=>{$('#searchDialog').showModal();if(!$('#query').value.trim()&&matchMedia('(hover: none) and (pointer: coarse)').matches)passageTable.querySelector('button[tabindex="0"]')?.focus({preventScroll:true});else $('#query').focus()};$('#settingsOpen').onclick=()=>$('#settings').showModal();$('#about').onclick=()=>$('#info').showModal();document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('#smaller').onclick=()=>{fontBeforeMax=null;state.size=Math.max(16,state.size-1);appearance()};$('#larger').onclick=()=>{fontBeforeMax=null;state.size=Math.min(28,state.size+1);appearance()};document.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>{state.theme=b.dataset.theme;appearance()});
 const passageTable=$('#passageTable');
 let passageBook='',passageChapter=0,passageStage='books',passageColumns=3;
 const passageIndex=new Map();
@@ -148,8 +159,25 @@ matchMedia('(max-width: 600px)').addEventListener('change',()=>{
   if(inTable)passageTable.querySelector(`[data-choice="${choice}"]`)?.focus({preventScroll:true});
 });
 renderPassage();
-let timer;$('#query').oninput=()=>{clearTimeout(timer);timer=setTimeout(search,130)};
-function search(){const raw=$('#query').value.trim(),q=raw.toLowerCase().replace(/psalms/g,'psalm');if(q.length<2){$('#results').innerHTML='';$('#searchHint').textContent='Enter at least two characters.';return}const hits=[];let total=0;const refQuery=/\d/.test(q);for(let i=0;i<verses.length;i++){const [ref,text]=verses[i],r=ref.toLowerCase();if(text.toLowerCase().includes(q)||(refQuery&&(r===q||r.startsWith(q+':')||r.startsWith(q+' ')))||(!refQuery&&r.startsWith(q))){total++;if(hits.length<80)hits.push(i)}}$('#searchHint').textContent=total?`${total.toLocaleString()} results${total>80?' · showing the first 80':''}`:'No matches. Try a full book name or a different phrase.';$('#results').innerHTML=hits.map(i=>`<button data-verse="${i}"><b>${esc(verses[i][0])} · ${esc(eras[verses[i][2]].title)}</b><span>${esc(verses[i][1])}</span></button>`).join('')}
+$('#query').oninput=search;
+function search(){
+  const raw=$('#query').value.trim(),q=raw.toLowerCase();
+  $('#searchDialog .passage-select').hidden=!!q;
+  if(!q){$('#results').innerHTML='';$('#searchHint').textContent='Search the full Recovery Version or choose a book, chapter, and verse.';return}
+  const reference=parseSearchReference(raw),hits=[];
+  let total=0;
+  for(let i=0;i<verses.length;i++){
+    const [ref,text]=verses[i];
+    let matches;
+    if(reference){
+      const target=reference.book+(reference.chapter===null?'':' '+reference.chapter)+(reference.verse===null?'':':'+reference.verse);
+      matches=reference.verse!==null?ref===target:ref.startsWith(target+(reference.chapter===null?' ':':'));
+    }else matches=text.toLowerCase().includes(q)||(!/\d/.test(q)&&ref.toLowerCase().startsWith(q));
+    if(matches){total++;if(hits.length<80)hits.push(i)}
+  }
+  $('#searchHint').textContent=total?`${total.toLocaleString()} results${total>80?' · showing the first 80':''}`:'No matches. Try a full book name or a different phrase.';
+  $('#results').innerHTML=hits.map(i=>`<button data-verse="${i}"><b>${esc(verses[i][0])} · ${esc(eras[verses[i][2]].title)}</b><span>${esc(verses[i][1])}</span></button>`).join('');
+}
 $('#results').onclick=e=>{const b=e.target.closest('button');if(b){$('#searchDialog').close();jump(+b.dataset.verse)}};
 document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||e.target.isContentEditable)return;if(document.querySelector('dialog[open]'))return;if(e.key.toLowerCase()==='m'){e.preventDefault();$('#bookmark').click();return}if(e.key.toLowerCase()==='f'){e.preventDefault();if(e.shiftKey){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});else document.documentElement.requestFullscreen?.().catch(()=>{})}else if(fontBeforeMax!==null){state.size=fontBeforeMax;fontBeforeMax=null;appearance()}else{fontBeforeMax=state.size;state.size=28;appearance()}return}if(['+','=','Add'].includes(e.key)){e.preventDefault();fontBeforeMax=null;state.size=Math.min(28,state.size+1);appearance();return}if(['-','_','Subtract'].includes(e.key)){e.preventDefault();fontBeforeMax=null;state.size=Math.max(16,state.size-1);appearance();return}if(document.querySelector('dialog[open]'))return;if(e.key==='/'){e.preventDefault();$('#searchOpen').click()}else if(e.key==='?'){e.preventDefault();$('#settingsOpen').click()}else if(e.key==='ArrowRight'||e.key.toLowerCase()==='l')$('#next').click();else if(e.key==='ArrowLeft'||e.key.toLowerCase()==='h')$('#previous').click();else if(e.key==='ArrowUp'||e.key.toLowerCase()==='k'){e.preventDefault();moveVerse(-1)}else if(e.key==='ArrowDown'||e.key.toLowerCase()==='j'){e.preventDefault();moveVerse(1)}else if((e.code==='Space'||e.key===' ')&&!e.target.closest('button,a,[role="button"]')){e.preventDefault();toggleVerseHighlight()}});
 function fromHash(){let ref;try{ref=decodeURIComponent(location.hash.slice(1))}catch{return false}const i=verses.findIndex(v=>v[0].toLowerCase()===ref.toLowerCase());if(i>=0){state.index=parts.findIndex(p=>i>=p.start&&i<p.end);focusVerse=i;cursorVerse=i;return true}return false}

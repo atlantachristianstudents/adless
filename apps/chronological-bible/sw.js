@@ -1,4 +1,4 @@
-const CACHE = 'chronological-bible-v41';
+const CACHE = 'chronological-bible-v43';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'order.js', 'manifest.webmanifest', 'icons/icon.svg'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
